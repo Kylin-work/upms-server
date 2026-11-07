@@ -1,5 +1,6 @@
 from ninja import NinjaAPI
 
+from apps.audit.api.queries import router as audit_router
 from apps.authz.api.batch_grant import router as batch_grant_router
 from apps.authz.api.grants import router as grants_router
 from apps.guard.api.me import router as me_router
@@ -15,6 +16,7 @@ api.add_router("", stores_router)
 api.add_router("", grants_router)
 api.add_router("", batch_grant_router)
 api.add_router("", users_router)
+api.add_router("", audit_router)
 
 
 @api.exception_handler(GuardError)
