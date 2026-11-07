@@ -2,7 +2,12 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from apps.authz.models import SysRole
+from apps.authz.models import (
+    SysPermissionSet,
+    SysPermissionSetItem,
+    SysResource,
+    SysRole,
+)
 from apps.orgs.models import SysOrg, SysPosition
 
 HQ = "HQ"
@@ -42,7 +47,6 @@ POSITIONS = [
     ),
 ]
 
-# (role_code, role_name, role_type, data_scope_type, assignable_level, realm, org_code)
 ROLES = [
     (
         "platform_super_admin",
@@ -123,6 +127,97 @@ ROLES = [
     ),
 ]
 
+# (resource_code, resource_name, res_type, op_type, realm_scope, http_method, api_pattern)
+RESOURCES = [
+    ("menu.store", "门店管理", "MENU", "QUERY", "ALL", None, None),
+    ("menu.store.list", "门店列表", "MENU", "QUERY", "ALL", None, None),
+    ("org.store.list", "门店列表接口", "API", "QUERY", "ALL", "GET", "/api/v1/stores"),
+    (
+        "org.store.create",
+        "批量建店接口",
+        "API",
+        "WRITE",
+        "ALL",
+        "POST",
+        "/api/v1/orgs/stores/batch",
+    ),
+    (
+        "franchise.store.report.query",
+        "加盟门店报表查询",
+        "API",
+        "QUERY",
+        "FRANCHISE",
+        "GET",
+        "/api/v1/franchise/stores/report",
+    ),
+    ("store.create", "新建门店按钮", "BUTTON", "WRITE", "ALL", None, None),
+    ("store.export", "导出门店按钮", "BUTTON", "QUERY", "ALL", None, None),
+    ("report.download", "报表下载按钮", "BUTTON", "QUERY", "ALL", None, None),
+]
+
+# (set_code, set_name, realm, set_type)
+PERMISSION_SETS = [
+    ("ps_hq_dept_base", "总部部门基础权限", "HQ", "FUNCTION"),
+    ("ps_hq_store_report_view", "总部门店报表只读", "HQ", "FUNCTION"),
+    ("ps_hq_ops_manage", "运营部管理权限", "HQ", "FUNCTION"),
+    ("ps_direct_store_full", "直营门店全权", "DIRECT", "FUNCTION"),
+    ("ps_direct_store_readonly", "直营门店只读", "DIRECT", "FUNCTION"),
+    ("ps_franchise_store_admin", "加盟店管理权限", "FRANCHISE", "FUNCTION"),
+    ("ps_franchise_store_biz", "加盟店业务权限", "FRANCHISE", "FUNCTION"),
+]
+
+# 权限集 → 资源码映射，按手册 2.4「内容要点」与附录 B 推断
+SET_ITEMS = {
+    "ps_hq_dept_base": ["menu.store", "menu.store.list", "org.store.list"],
+    "ps_hq_store_report_view": [
+        "menu.store",
+        "menu.store.list",
+        "org.store.list",
+        "franchise.store.report.query",
+        "store.export",
+        "report.download",
+    ],
+    "ps_hq_ops_manage": [
+        "menu.store",
+        "menu.store.list",
+        "org.store.list",
+        "org.store.create",
+        "franchise.store.report.query",
+        "store.create",
+        "store.export",
+        "report.download",
+    ],
+    "ps_direct_store_full": [
+        "menu.store",
+        "menu.store.list",
+        "org.store.list",
+        "org.store.create",
+        "store.create",
+        "store.export",
+    ],
+    "ps_direct_store_readonly": [
+        "menu.store",
+        "menu.store.list",
+        "org.store.list",
+        "store.export",
+    ],
+    "ps_franchise_store_admin": [
+        "menu.store",
+        "menu.store.list",
+        "org.store.list",
+        "franchise.store.report.query",
+        "store.export",
+        "report.download",
+    ],
+    "ps_franchise_store_biz": [
+        "menu.store",
+        "menu.store.list",
+        "org.store.list",
+        "franchise.store.report.query",
+        "store.export",
+    ],
+}
+
 
 class Command(BaseCommand):
     help = "灌入权限基线数据（手册第 2 节）"
@@ -130,7 +225,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             "--step",
-            choices=["orgs", "positions", "roles"],
+            choices=["orgs", "positions", "roles", "permission_sets"],
             required=True,
             help="要执行的步骤",
         )
@@ -143,6 +238,8 @@ class Command(BaseCommand):
             self.seed_positions()
         elif step == "roles":
             self.seed_roles()
+        elif step == "permission_sets":
+            self.seed_permission_sets()
 
     @transaction.atomic
     def seed_orgs(self):
@@ -226,6 +323,52 @@ class Command(BaseCommand):
             )
         self._assert_roles()
 
+    @transaction.atomic
+    def seed_permission_sets(self):
+        for (
+            code,
+            name,
+            res_type,
+            op_type,
+            realm_scope,
+            http_method,
+            api_pattern,
+        ) in RESOURCES:
+            if not SysResource.objects.filter(resource_code=code).exists():
+                SysResource.objects.create(
+                    resource_code=code,
+                    resource_name=name,
+                    res_type=res_type,
+                    op_type=op_type,
+                    realm_scope=realm_scope,
+                    http_method=http_method,
+                    api_pattern=api_pattern,
+                    menu_sort=0,
+                    is_public=False,
+                    status=1,
+                )
+        for code, name, realm, set_type in PERMISSION_SETS:
+            if not SysPermissionSet.objects.filter(set_code=code).exists():
+                SysPermissionSet.objects.create(
+                    set_code=code,
+                    set_name=name,
+                    realm=realm,
+                    set_type=set_type,
+                    version=1,
+                    status=1,
+                )
+        now = timezone.now()
+        for set_code, resource_codes in SET_ITEMS.items():
+            pset = SysPermissionSet.objects.get(set_code=set_code)
+            for rc in resource_codes:
+                resource = SysResource.objects.get(resource_code=rc)
+                SysPermissionSetItem.objects.get_or_create(
+                    set=pset,
+                    resource=resource,
+                    defaults={"effect": "ALLOW", "granted_at": now},
+                )
+        self._assert_permission_sets()
+
     def _assert_orgs(self):
         try:
             ops = SysOrg.objects.get(org_code="DEPT_OPS")
@@ -263,3 +406,32 @@ class Command(BaseCommand):
         missing = expected - actual
         if missing:
             raise CommandError(f"角色缺失：{sorted(missing)}")
+
+    def _assert_permission_sets(self):
+        expected_res = {r[0] for r in RESOURCES}
+        actual_res = set(
+            SysResource.objects.filter(resource_code__in=expected_res).values_list(
+                "resource_code", flat=True
+            )
+        )
+        missing_res = expected_res - actual_res
+        if missing_res:
+            raise CommandError(f"资源缺失：{sorted(missing_res)}")
+        expected_sets = {s[0] for s in PERMISSION_SETS}
+        actual_sets = set(
+            SysPermissionSet.objects.filter(set_code__in=expected_sets).values_list(
+                "set_code", flat=True
+            )
+        )
+        missing_sets = expected_sets - actual_sets
+        if missing_sets:
+            raise CommandError(f"权限集缺失：{sorted(missing_sets)}")
+        # 只读集必须只含 QUERY 资源
+        view_set = SysPermissionSet.objects.get(set_code="ps_hq_store_report_view")
+        bad = (
+            SysPermissionSetItem.objects.filter(set=view_set)
+            .exclude(resource__op_type="QUERY")
+            .exists()
+        )
+        if bad:
+            raise CommandError("ps_hq_store_report_view 含非 QUERY 资源")
