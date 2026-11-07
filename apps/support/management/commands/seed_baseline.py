@@ -1,3 +1,4 @@
+from django.contrib.auth.hashers import make_password
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
@@ -9,6 +10,7 @@ from apps.authz.models import (
     SysResource,
     SysRole,
 )
+from apps.identity.models import SysUser
 from apps.orgs.models import SysOrg, SysPosition
 
 HQ = "HQ"
@@ -218,6 +220,10 @@ SET_ITEMS = {
 
 FRANCHISE_REPORT_RESOURCE = "franchise.store.report.query"
 
+SUPER_ADMIN_USERNAME = "admin"
+SUPER_ADMIN_REAL_NAME = "超级管理员"
+SUPER_ADMIN_INITIAL_PASSWORD = "Admin@123456"
+
 
 class Command(BaseCommand):
     help = "灌入权限基线数据（手册第 2 节）"
@@ -231,6 +237,7 @@ class Command(BaseCommand):
                 "roles",
                 "permission_sets",
                 "data_scope_rules",
+                "super_admin",
             ],
             required=True,
             help="要执行的步骤",
@@ -248,6 +255,8 @@ class Command(BaseCommand):
             self.seed_permission_sets()
         elif step == "data_scope_rules":
             self.seed_data_scope_rules()
+        elif step == "super_admin":
+            self.seed_super_admin()
 
     @transaction.atomic
     def seed_orgs(self):
@@ -399,6 +408,28 @@ class Command(BaseCommand):
             )
         self._assert_data_scope_rules()
 
+    @transaction.atomic
+    def seed_super_admin(self):
+        now = timezone.now()
+        user = SysUser.objects.filter(username=SUPER_ADMIN_USERNAME).first()
+        if user is None:
+            SysUser.objects.create(
+                username=SUPER_ADMIN_USERNAME,
+                real_name=SUPER_ADMIN_REAL_NAME,
+                password_hash=make_password(SUPER_ADMIN_INITIAL_PASSWORD),
+                is_platform_admin=True,
+                org_id=None,
+                position_id=None,
+                realm=None,
+                store_id=None,
+                status=1,
+                pwd_updated_at=now,
+                last_login_at=None,
+                created_at=now,
+                updated_at=now,
+            )
+        self._assert_super_admin()
+
     def _assert_orgs(self):
         try:
             ops = SysOrg.objects.get(org_code="DEPT_OPS")
@@ -479,3 +510,15 @@ class Command(BaseCommand):
         missing = set(hq_role_ids) - covered
         if missing:
             raise CommandError(f"以下 HQ 角色缺少加盟店报表范围规则：{sorted(missing)}")
+
+    def _assert_super_admin(self):
+        try:
+            user = SysUser.objects.get(username=SUPER_ADMIN_USERNAME)
+        except SysUser.DoesNotExist as exc:
+            raise CommandError("超管账号不存在") from exc
+        if not user.is_platform_admin:
+            raise CommandError("超管账号 is_platform_admin 不为 TRUE")
+        if any([user.org_id, user.position_id, user.realm, user.store_id]):
+            raise CommandError(
+                "超管账号的 org_id/position_id/realm/store_id 必须同时为 NULL"
+            )
