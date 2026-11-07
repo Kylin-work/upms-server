@@ -93,6 +93,18 @@ RESOURCES = [
         None,
     ),
     (
+        "identity.user.batch_create",
+        "批量开户接口",
+        "API",
+        "WRITE",
+        "ALL",
+        "POST",
+        "/api/v1/users/batch",
+        None,
+        False,
+        None,
+    ),
+    (
         "store.create",
         "新建门店按钮",
         "BUTTON",
@@ -146,6 +158,7 @@ SET_ITEMS = {
         "menu.store.list",
         "org.store.list",
         "authz.role.grant",
+        "identity.user.batch_create",
     ],
     "ps_hq_store_report_view": [
         "menu.store",
