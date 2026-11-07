@@ -1,13 +1,19 @@
+from django.core.cache import cache
+
 from apps.authz.models import SysResource
 
-_registry: dict[str, SysResource] | None = None
+REGISTRY_CACHE_KEY = "guard:resource_registry"
+REGISTRY_TTL = 3600
 
 
 def load_registry() -> dict[str, SysResource]:
-    global _registry
-    if _registry is None:
-        _registry = {r.resource_code: r for r in SysResource.objects.filter(status=1)}
-    return _registry
+    # 先查 Redis 缓存,miss 时查库并回写
+    cached = cache.get(REGISTRY_CACHE_KEY)
+    if cached is not None:
+        return cached
+    registry = {r.resource_code: r for r in SysResource.objects.filter(status=1)}
+    cache.set(REGISTRY_CACHE_KEY, registry, REGISTRY_TTL)
+    return registry
 
 
 def get_resource(resource_code: str) -> SysResource | None:
@@ -15,5 +21,5 @@ def get_resource(resource_code: str) -> SysResource | None:
 
 
 def invalidate_registry() -> None:
-    global _registry
-    _registry = None
+    # 资源变更后调用,所有进程共享同一份缓存
+    cache.delete(REGISTRY_CACHE_KEY)
