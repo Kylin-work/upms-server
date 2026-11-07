@@ -4,6 +4,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from apps.authz.models import SysPermissionSet, SysPermissionSetItem, SysResource
+from apps.guard.services.registry import invalidate_registry
 from apps.support.models import SysPermVersion
 
 # (resource_code, resource_name, res_type, op_type, realm_scope, http_method, api_pattern, menu_path, is_public, parent_code)
@@ -270,6 +271,7 @@ def run():
             )
     _assert()
     _bump_global_version()
+    invalidate_registry()
 
 
 def _assert():
