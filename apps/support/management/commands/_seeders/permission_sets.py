@@ -6,7 +6,7 @@ from django.utils import timezone
 from apps.authz.models import SysPermissionSet, SysPermissionSetItem, SysResource
 from apps.support.models import SysPermVersion
 
-# (resource_code, resource_name, res_type, op_type, realm_scope, http_method, api_pattern, is_public)
+# (resource_code, resource_name, res_type, op_type, realm_scope, http_method, api_pattern, menu_path, is_public, parent_code)
 RESOURCES = [
     (
         "me.perm.view",
@@ -16,10 +16,34 @@ RESOURCES = [
         "ALL",
         "GET",
         "/api/v1/me/permissions",
+        None,
         True,
+        None,
     ),
-    ("menu.store", "门店管理", "MENU", "QUERY", "ALL", None, None, False),
-    ("menu.store.list", "门店列表", "MENU", "QUERY", "ALL", None, None, False),
+    (
+        "menu.store",
+        "门店管理",
+        "MENU",
+        "QUERY",
+        "ALL",
+        None,
+        None,
+        "/store",
+        False,
+        None,
+    ),
+    (
+        "menu.store.list",
+        "门店列表",
+        "MENU",
+        "QUERY",
+        "ALL",
+        None,
+        None,
+        "/store/list",
+        False,
+        "menu.store",
+    ),
     (
         "org.store.list",
         "门店列表接口",
@@ -28,7 +52,9 @@ RESOURCES = [
         "ALL",
         "GET",
         "/api/v1/stores",
+        None,
         False,
+        None,
     ),
     (
         "org.store.create",
@@ -38,7 +64,9 @@ RESOURCES = [
         "ALL",
         "POST",
         "/api/v1/orgs/stores/batch",
+        None,
         False,
+        None,
     ),
     (
         "franchise.store.report.query",
@@ -48,11 +76,46 @@ RESOURCES = [
         "FRANCHISE",
         "GET",
         "/api/v1/franchise/stores/report",
+        None,
         False,
+        None,
     ),
-    ("store.create", "新建门店按钮", "BUTTON", "WRITE", "ALL", None, None, False),
-    ("store.export", "导出门店按钮", "BUTTON", "QUERY", "ALL", None, None, False),
-    ("report.download", "报表下载按钮", "BUTTON", "QUERY", "ALL", None, None, False),
+    (
+        "store.create",
+        "新建门店按钮",
+        "BUTTON",
+        "WRITE",
+        "ALL",
+        None,
+        None,
+        None,
+        False,
+        None,
+    ),
+    (
+        "store.export",
+        "导出门店按钮",
+        "BUTTON",
+        "QUERY",
+        "ALL",
+        None,
+        None,
+        None,
+        False,
+        None,
+    ),
+    (
+        "report.download",
+        "报表下载按钮",
+        "BUTTON",
+        "QUERY",
+        "ALL",
+        None,
+        None,
+        None,
+        False,
+        None,
+    ),
 ]
 
 PERMISSION_SETS = [
@@ -127,7 +190,9 @@ def run():
         realm_scope,
         http_method,
         api_pattern,
+        menu_path,
         is_public,
+        _,
     ) in RESOURCES:
         if not SysResource.objects.filter(resource_code=code).exists():
             SysResource.objects.create(
@@ -138,10 +203,20 @@ def run():
                 realm_scope=realm_scope,
                 http_method=http_method,
                 api_pattern=api_pattern,
+                menu_path=menu_path,
                 menu_sort=0,
                 is_public=is_public,
                 status=1,
             )
+    for code, _, _, _, _, _, _, menu_path, _, _ in RESOURCES:
+        if menu_path is None:
+            continue
+        SysResource.objects.filter(resource_code=code).update(menu_path=menu_path)
+    for code, _, _, _, _, _, _, _, _, parent_code in RESOURCES:
+        if parent_code is None:
+            continue
+        parent = SysResource.objects.get(resource_code=parent_code)
+        SysResource.objects.filter(resource_code=code).update(parent=parent)
     for code, name, realm, set_type in PERMISSION_SETS:
         if not SysPermissionSet.objects.filter(set_code=code).exists():
             SysPermissionSet.objects.create(
