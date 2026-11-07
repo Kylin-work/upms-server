@@ -8,6 +8,10 @@ from apps.guard.services.registry import get_resource
 
 def authorize(request: HttpRequest, resource_code: str) -> None:
     user = request.user
+    if user.is_platform_admin:
+        request.ctx_data_scope = {"type": "ALL"}
+        return
+
     resource = get_resource(resource_code)
     if resource is None:
         raise Forbidden("RESOURCE_NOT_REGISTERED")
