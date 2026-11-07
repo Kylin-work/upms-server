@@ -81,6 +81,18 @@ RESOURCES = [
         None,
     ),
     (
+        "authz.role.grant",
+        "角色授权接口",
+        "API",
+        "ADMIN",
+        "ALL",
+        "POST",
+        "/api/v1/authz/roles/{role_id}/grants",
+        None,
+        False,
+        None,
+    ),
+    (
         "store.create",
         "新建门店按钮",
         "BUTTON",
@@ -129,7 +141,12 @@ PERMISSION_SETS = [
 ]
 
 SET_ITEMS = {
-    "ps_hq_dept_base": ["menu.store", "menu.store.list", "org.store.list"],
+    "ps_hq_dept_base": [
+        "menu.store",
+        "menu.store.list",
+        "org.store.list",
+        "authz.role.grant",
+    ],
     "ps_hq_store_report_view": [
         "menu.store",
         "menu.store.list",
@@ -144,6 +161,7 @@ SET_ITEMS = {
         "org.store.list",
         "org.store.create",
         "franchise.store.report.query",
+        "authz.role.grant",
         "store.create",
         "store.export",
         "report.download",
