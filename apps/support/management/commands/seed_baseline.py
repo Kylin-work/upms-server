@@ -5,6 +5,7 @@ from ._seeders import (
     orgs,
     permission_sets,
     positions,
+    role_sets,
     roles,
     super_admin,
 )
@@ -14,6 +15,7 @@ STEPS = {
     "positions": positions.run,
     "roles": roles.run,
     "permission_sets": permission_sets.run,
+    "role_sets": role_sets.run,
     "data_scope_rules": data_scope_rules.run,
     "super_admin": super_admin.run,
 }
