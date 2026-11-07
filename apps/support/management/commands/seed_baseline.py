@@ -3,6 +3,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.authz.models import (
+    SysDataScopeRule,
     SysPermissionSet,
     SysPermissionSetItem,
     SysResource,
@@ -127,7 +128,6 @@ ROLES = [
     ),
 ]
 
-# (resource_code, resource_name, res_type, op_type, realm_scope, http_method, api_pattern)
 RESOURCES = [
     ("menu.store", "门店管理", "MENU", "QUERY", "ALL", None, None),
     ("menu.store.list", "门店列表", "MENU", "QUERY", "ALL", None, None),
@@ -155,7 +155,6 @@ RESOURCES = [
     ("report.download", "报表下载按钮", "BUTTON", "QUERY", "ALL", None, None),
 ]
 
-# (set_code, set_name, realm, set_type)
 PERMISSION_SETS = [
     ("ps_hq_dept_base", "总部部门基础权限", "HQ", "FUNCTION"),
     ("ps_hq_store_report_view", "总部门店报表只读", "HQ", "FUNCTION"),
@@ -166,7 +165,6 @@ PERMISSION_SETS = [
     ("ps_franchise_store_biz", "加盟店业务权限", "FRANCHISE", "FUNCTION"),
 ]
 
-# 权限集 → 资源码映射，按手册 2.4「内容要点」与附录 B 推断
 SET_ITEMS = {
     "ps_hq_dept_base": ["menu.store", "menu.store.list", "org.store.list"],
     "ps_hq_store_report_view": [
@@ -218,6 +216,8 @@ SET_ITEMS = {
     ],
 }
 
+FRANCHISE_REPORT_RESOURCE = "franchise.store.report.query"
+
 
 class Command(BaseCommand):
     help = "灌入权限基线数据（手册第 2 节）"
@@ -225,7 +225,13 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             "--step",
-            choices=["orgs", "positions", "roles", "permission_sets"],
+            choices=[
+                "orgs",
+                "positions",
+                "roles",
+                "permission_sets",
+                "data_scope_rules",
+            ],
             required=True,
             help="要执行的步骤",
         )
@@ -240,6 +246,8 @@ class Command(BaseCommand):
             self.seed_roles()
         elif step == "permission_sets":
             self.seed_permission_sets()
+        elif step == "data_scope_rules":
+            self.seed_data_scope_rules()
 
     @transaction.atomic
     def seed_orgs(self):
@@ -369,6 +377,28 @@ class Command(BaseCommand):
                 )
         self._assert_permission_sets()
 
+    @transaction.atomic
+    def seed_data_scope_rules(self):
+        franchise_ids = list(
+            SysOrg.objects.filter(org_type="STORE_FRANCHISE", status=1).values_list(
+                "id", flat=True
+            )
+        )
+        hq_roles = SysRole.objects.filter(realm="HQ", status=1)
+        for role in hq_roles:
+            SysDataScopeRule.objects.get_or_create(
+                role=role,
+                resource_code=FRANCHISE_REPORT_RESOURCE,
+                defaults={
+                    "scope_type": "ORG_SET",
+                    "scope_org_ids": franchise_ids,
+                    "include_children": True,
+                    "priority": 10,
+                    "status": 1,
+                },
+            )
+        self._assert_data_scope_rules()
+
     def _assert_orgs(self):
         try:
             ops = SysOrg.objects.get(org_code="DEPT_OPS")
@@ -426,7 +456,6 @@ class Command(BaseCommand):
         missing_sets = expected_sets - actual_sets
         if missing_sets:
             raise CommandError(f"权限集缺失：{sorted(missing_sets)}")
-        # 只读集必须只含 QUERY 资源
         view_set = SysPermissionSet.objects.get(set_code="ps_hq_store_report_view")
         bad = (
             SysPermissionSetItem.objects.filter(set=view_set)
@@ -435,3 +464,18 @@ class Command(BaseCommand):
         )
         if bad:
             raise CommandError("ps_hq_store_report_view 含非 QUERY 资源")
+
+    def _assert_data_scope_rules(self):
+        hq_role_ids = list(
+            SysRole.objects.filter(realm="HQ", status=1).values_list("id", flat=True)
+        )
+        covered = set(
+            SysDataScopeRule.objects.filter(
+                role_id__in=hq_role_ids,
+                resource_code=FRANCHISE_REPORT_RESOURCE,
+                status=1,
+            ).values_list("role_id", flat=True)
+        )
+        missing = set(hq_role_ids) - covered
+        if missing:
+            raise CommandError(f"以下 HQ 角色缺少加盟店报表范围规则：{sorted(missing)}")
