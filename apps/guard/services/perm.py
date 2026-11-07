@@ -16,6 +16,10 @@ def authorize(request: HttpRequest, resource_code: str) -> None:
     if resource is None:
         raise Forbidden("RESOURCE_NOT_REGISTERED")
 
+    if resource.is_public:
+        request.ctx_data_scope = None
+        return
+
     snapshot = load_permission_snapshot(user)
 
     if resource_code not in snapshot["api_codes"]:

@@ -1,13 +1,35 @@
 from django.core.management.base import CommandError
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from apps.authz.models import SysPermissionSet, SysPermissionSetItem, SysResource
+from apps.support.models import SysPermVersion
 
+# (resource_code, resource_name, res_type, op_type, realm_scope, http_method, api_pattern, is_public)
 RESOURCES = [
-    ("menu.store", "门店管理", "MENU", "QUERY", "ALL", None, None),
-    ("menu.store.list", "门店列表", "MENU", "QUERY", "ALL", None, None),
-    ("org.store.list", "门店列表接口", "API", "QUERY", "ALL", "GET", "/api/v1/stores"),
+    (
+        "me.perm.view",
+        "当前用户权限查询",
+        "API",
+        "QUERY",
+        "ALL",
+        "GET",
+        "/api/v1/me/permissions",
+        True,
+    ),
+    ("menu.store", "门店管理", "MENU", "QUERY", "ALL", None, None, False),
+    ("menu.store.list", "门店列表", "MENU", "QUERY", "ALL", None, None, False),
+    (
+        "org.store.list",
+        "门店列表接口",
+        "API",
+        "QUERY",
+        "ALL",
+        "GET",
+        "/api/v1/stores",
+        False,
+    ),
     (
         "org.store.create",
         "批量建店接口",
@@ -16,6 +38,7 @@ RESOURCES = [
         "ALL",
         "POST",
         "/api/v1/orgs/stores/batch",
+        False,
     ),
     (
         "franchise.store.report.query",
@@ -25,10 +48,11 @@ RESOURCES = [
         "FRANCHISE",
         "GET",
         "/api/v1/franchise/stores/report",
+        False,
     ),
-    ("store.create", "新建门店按钮", "BUTTON", "WRITE", "ALL", None, None),
-    ("store.export", "导出门店按钮", "BUTTON", "QUERY", "ALL", None, None),
-    ("report.download", "报表下载按钮", "BUTTON", "QUERY", "ALL", None, None),
+    ("store.create", "新建门店按钮", "BUTTON", "WRITE", "ALL", None, None, False),
+    ("store.export", "导出门店按钮", "BUTTON", "QUERY", "ALL", None, None, False),
+    ("report.download", "报表下载按钮", "BUTTON", "QUERY", "ALL", None, None, False),
 ]
 
 PERMISSION_SETS = [
@@ -103,6 +127,7 @@ def run():
         realm_scope,
         http_method,
         api_pattern,
+        is_public,
     ) in RESOURCES:
         if not SysResource.objects.filter(resource_code=code).exists():
             SysResource.objects.create(
@@ -114,7 +139,7 @@ def run():
                 http_method=http_method,
                 api_pattern=api_pattern,
                 menu_sort=0,
-                is_public=False,
+                is_public=is_public,
                 status=1,
             )
     for code, name, realm, set_type in PERMISSION_SETS:
@@ -138,6 +163,7 @@ def run():
                 defaults={"effect": "ALLOW", "granted_at": now},
             )
     _assert()
+    _bump_global_version()
 
 
 def _assert():
@@ -167,3 +193,16 @@ def _assert():
     )
     if bad:
         raise CommandError("ps_hq_store_report_view 含非 QUERY 资源")
+
+
+def _bump_global_version():
+    now = timezone.now()
+    _, created = SysPermVersion.objects.get_or_create(
+        scope_key="GLOBAL",
+        defaults={"version": 1, "updated_at": now},
+    )
+    if not created:
+        SysPermVersion.objects.filter(scope_key="GLOBAL").update(
+            version=F("version") + 1,
+            updated_at=now,
+        )
