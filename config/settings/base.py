@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 项目根目录
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # 密钥:生产环境必须从环境变量读取
 SECRET_KEY = "django-insecure-+h9rqomhy!gp99#k(-^pkz%9k-)wb9$*1un0dk-(we@qwh=633"
@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "ninja",
     # 自定义应用
     "apps.orgs",
     "apps.identity",
@@ -130,6 +131,7 @@ USE_TZ = True
 
 # 静态文件
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # 默认主键类型
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
