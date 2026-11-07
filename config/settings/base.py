@@ -87,6 +87,22 @@ DATABASES = {
     }
 }
 
+# Redis 逻辑库:缓存用 0,会话黑名单用 2,Broker 用 1(Celery 后续启用)
+REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": f"{REDIS_URL}/0",
+    },
+    "session_blacklist": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": f"{REDIS_URL}/2",
+    },
+}
+
+CELERY_BROKER_URL = f"{REDIS_URL}/1"
+
 # 密码强度校验
 AUTH_PASSWORD_VALIDATORS = [
     {
