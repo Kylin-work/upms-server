@@ -103,3 +103,91 @@ def create_store(
         ip=ip,
     )
     return store
+
+
+@transaction.atomic
+def update_store(
+    *,
+    store_id: int,
+    org_name: str | None = None,
+    operator_id: int,
+    trace_id: str | None = None,
+    request_path: str = "",
+    ip: str | None = None,
+) -> SysOrg:
+    """更新门店基础信息,只允许改 org_name."""
+    store = SysOrg.objects.filter(
+        id=store_id, org_type__in=["STORE_DIRECT", "STORE_FRANCHISE"]
+    ).first()
+    if store is None:
+        raise StoreCreateError("STORE_NOT_FOUND")
+    if org_name is not None:
+        store.org_name = org_name
+        store.updated_at = timezone.now()
+        store.save(update_fields=["org_name", "updated_at"])
+    log_operation(
+        trace_id=trace_id or uuid.uuid4().hex,
+        user_id=operator_id,
+        username=str(operator_id),
+        module="orgs",
+        resource_code="org.store.create",
+        http_method="PUT",
+        request_path=request_path,
+        result="SUCCESS",
+        target_type="STORE",
+        target_id=store.id,
+        target_org_id=store.id,
+        ip=ip,
+    )
+    return store
+
+
+@transaction.atomic
+def disable_store(
+    *,
+    store_id: int,
+    operator_id: int,
+    trace_id: str | None = None,
+    request_path: str = "",
+    ip: str | None = None,
+) -> SysOrg:
+    """停用门店,软删,status 置 0."""
+    store = SysOrg.objects.filter(
+        id=store_id, org_type__in=["STORE_DIRECT", "STORE_FRANCHISE"]
+    ).first()
+    if store is None:
+        raise StoreCreateError("STORE_NOT_FOUND")
+    if store.status == 0:
+        raise StoreCreateError("STORE_ALREADY_DISABLED")
+    store.status = 0
+    store.updated_at = timezone.now()
+    store.save(update_fields=["status", "updated_at"])
+    log_operation(
+        trace_id=trace_id or uuid.uuid4().hex,
+        user_id=operator_id,
+        username=str(operator_id),
+        module="orgs",
+        resource_code="org.store.create",
+        http_method="DELETE",
+        request_path=request_path,
+        result="SUCCESS",
+        target_type="STORE",
+        target_id=store.id,
+        target_org_id=store.id,
+        ip=ip,
+    )
+    return store
+
+
+def get_store(store_id: int, scope: dict | None) -> SysOrg:
+    """按 id 查门店,并套数据范围过滤."""
+    from apps.guard.selectors.filters import apply_data_scope
+
+    qs = SysOrg.objects.filter(
+        id=store_id, org_type__in=["STORE_DIRECT", "STORE_FRANCHISE"]
+    )
+    qs = apply_data_scope(qs, scope, org_field="path")
+    store = qs.first()
+    if store is None:
+        raise StoreCreateError("STORE_NOT_FOUND")
+    return store
