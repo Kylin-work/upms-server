@@ -56,7 +56,7 @@ def _assert():
 
 def _bump_global_version():
     now = timezone.now()
-    _row, created = SysPermVersion.objects.get_or_create(
+    _, created = SysPermVersion.objects.get_or_create(
         scope_key="GLOBAL",
         defaults={"version": 1, "updated_at": now},
     )

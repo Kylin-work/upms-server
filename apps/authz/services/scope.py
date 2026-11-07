@@ -62,7 +62,8 @@ def _role_default_scope(role: SysRole, user) -> dict | None:
     if scope_type == "SELF_ONLY":
         return {"type": "SELF_ONLY", "user_id": user.id}
     if scope_type == "ORG_SUBTREE":
-        org = SysOrg.objects.filter(id=role.org_id).first()
+        org_id = role.org_id or user.org_id
+        org = SysOrg.objects.filter(id=org_id).first()
         if org is None:
             return None
         return {"type": "ORG_TREE", "path_prefixes": [normalize_path(org.path)]}
