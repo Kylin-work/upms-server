@@ -1,9 +1,16 @@
+import uuid
 from dataclasses import dataclass, field
 
+from django.db import transaction
+from django.db.models import F
+from django.utils import timezone
+
+from apps.audit.services import log_grant_change
 from apps.authz.models import SysRole, SysUserRole
 from apps.authz.services.grant import _operator_levels, can_grant
 from apps.identity.models import SysUser
 from apps.orgs.models import SysOrg
+from apps.support.models import SysPermVersion
 
 
 class BatchGrantError(Exception):
@@ -20,6 +27,14 @@ class DryRunResult:
     affected_users: list[dict] = field(default_factory=list)
     skipped_users: list[dict] = field(default_factory=list)
     rejected_users: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class ExecuteResult:
+    batch_id: str
+    affected_count: int
+    skipped_count: int
+    rejected_count: int
 
 
 def resolve_targets(
@@ -67,33 +82,86 @@ def dry_run(
     if len(roles) != len(role_codes):
         raise BatchGrantError("ROLE_NOT_FOUND")
 
-    result = DryRunResult()
     for role in roles:
         _check_realm_grantable(operator, role)
 
+    result = DryRunResult()
     for user in target_users:
-        user_result = _classify_user(user, roles, operator)
-        if user_result[0] == "affected":
-            result.affected_users.append(
-                {"user_id": user.id, "username": user.username, "reasons": []}
-            )
-        elif user_result[0] == "skipped":
-            result.skipped_users.append(
-                {
-                    "user_id": user.id,
-                    "username": user.username,
-                    "reasons": user_result[1],
-                }
-            )
+        status, reasons = _classify_user(user, roles, operator)
+        entry = {"user_id": user.id, "username": user.username, "reasons": reasons}
+        if status == "affected":
+            result.affected_users.append(entry)
+        elif status == "skipped":
+            result.skipped_users.append(entry)
         else:
-            result.rejected_users.append(
-                {
-                    "user_id": user.id,
-                    "username": user.username,
-                    "reasons": user_result[1],
-                }
-            )
+            result.rejected_users.append(entry)
     return result
+
+
+@transaction.atomic
+def execute(
+    *,
+    target_users: list[SysUser],
+    role_codes: list[str],
+    operator,
+    reason: str,
+) -> ExecuteResult:
+    """正式执行批量授权,分页 upsert,写审计与版本号."""
+    roles = list(SysRole.objects.filter(role_code__in=role_codes, status=1))
+    if len(roles) != len(role_codes):
+        raise BatchGrantError("ROLE_NOT_FOUND")
+
+    for role in roles:
+        _check_realm_grantable(operator, role)
+
+    batch_id = uuid.uuid4().hex
+    now = timezone.now()
+    affected_count = 0
+    skipped_count = 0
+    rejected_count = 0
+
+    for user in target_users:
+        status, _reasons = _classify_user(user, roles, operator)
+        if status == "skipped":
+            skipped_count += 1
+            continue
+        if status == "rejected":
+            rejected_count += 1
+            continue
+        for role in roles:
+            SysUserRole.objects.get_or_create(
+                user=user,
+                role=role,
+                defaults={
+                    "granted_by": operator.id,
+                    "granted_at": now,
+                    "source": "BATCH",
+                    "batch_id": batch_id,
+                },
+            )
+        _bump_version(f"USER:{user.id}", now)
+        affected_count += 1
+
+    _bump_version("GLOBAL", now)
+    log_grant_change(
+        trace_id=uuid.uuid4().hex,
+        operator_id=operator.id,
+        change_type="GRANT",
+        target_type="USER",
+        target_id=0,
+        reason=reason,
+        diff_summary=(
+            f"affected={affected_count},skipped={skipped_count},rejected={rejected_count}"
+        ),
+        batch_id=batch_id,
+    )
+
+    return ExecuteResult(
+        batch_id=batch_id,
+        affected_count=affected_count,
+        skipped_count=skipped_count,
+        rejected_count=rejected_count,
+    )
 
 
 def _check_realm_grantable(operator, role: SysRole) -> None:
@@ -128,3 +196,15 @@ def _classify_user(
     if len(existing) == len(roles):
         return "skipped", ["ALREADY_GRANTED"]
     return "affected", []
+
+
+def _bump_version(scope_key: str, now) -> None:
+    _, created = SysPermVersion.objects.get_or_create(
+        scope_key=scope_key,
+        defaults={"version": 1, "updated_at": now},
+    )
+    if not created:
+        SysPermVersion.objects.filter(scope_key=scope_key).update(
+            version=F("version") + 1,
+            updated_at=now,
+        )
