@@ -16,8 +16,8 @@ from apps.orgs.services.store_batch import (
     BatchStoreError,
     create_job,
     parse_csv,
-    run_job,
 )
+from apps.orgs.tasks import run_store_batch_job
 
 router = Router(tags=["orgs"])
 
@@ -94,7 +94,8 @@ def batch_create_stores(request, file: File[UploadedFile]):
         # 重复提交返回 409,其余 400
         status = 409 if exc.code.startswith("DUPLICATE_JOB") else 400
         raise HttpError(status, exc.code) from exc
-    run_job(job=job, rows=rows, operator_id=request.user.id)
+    run_store_batch_job.delay(job.id, rows, request.user.id)
+
     return {
         "job_no": job.job_no,
         "total_count": job.total_count,
