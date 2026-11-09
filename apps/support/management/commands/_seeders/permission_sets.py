@@ -381,6 +381,18 @@ RESOURCES = [
         False,
         None,
     ),
+    (
+        "org.tree.view",
+        "组织树查询",
+        "API",
+        "QUERY",
+        "ALL",
+        "GET",
+        "/api/v1/orgs/tree",
+        None,
+        False,
+        None,
+    ),
 ]
 
 PERMISSION_SETS = [
@@ -420,6 +432,7 @@ SET_ITEMS = {
         "audit.operation.query",
         "audit.grant.query",
         "platform.job.view",
+        "org.tree.view",
     ],
     "ps_hq_store_report_view": [
         "menu.store",
