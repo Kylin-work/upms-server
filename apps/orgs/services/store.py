@@ -91,7 +91,7 @@ def create_store(
     log_operation(
         trace_id=trace_id or uuid.uuid4().hex,
         user_id=operator_id,
-        username=str(operator_id),
+        username=None,
         module="orgs",
         resource_code="org.store.create",
         http_method="POST",
@@ -128,7 +128,7 @@ def update_store(
     log_operation(
         trace_id=trace_id or uuid.uuid4().hex,
         user_id=operator_id,
-        username=str(operator_id),
+        username=None,
         module="orgs",
         resource_code="org.store.create",
         http_method="PUT",
@@ -165,7 +165,7 @@ def disable_store(
     log_operation(
         trace_id=trace_id or uuid.uuid4().hex,
         user_id=operator_id,
-        username=str(operator_id),
+        username=None,
         module="orgs",
         resource_code="org.store.create",
         http_method="DELETE",
