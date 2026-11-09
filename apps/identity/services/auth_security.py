@@ -14,7 +14,6 @@ def is_locked(username: str) -> bool:
 
 def record_failure(username: str) -> int:
     key = _fail_key(username)
-    # 如果 key 不存在，先初始化为 0，并设置过期时间
     if cache.add(key, 0, LOCKOUT_SECONDS):
         count = cache.incr(key)
     else:
@@ -24,3 +23,27 @@ def record_failure(username: str) -> int:
 
 def clear_failures(username: str) -> None:
     cache.delete(_fail_key(username))
+
+
+def _force_logout_key(user_id: int) -> str:
+    return f"user:force_logout_at:{user_id}"
+
+
+def force_logout(user_id: int) -> None:
+    """强制下线指定用户的所有设备,记录当前时间戳."""
+    import time
+
+    # 存当前时间戳,有效期设为 Refresh Token 的最大有效期(7天),防止内存泄漏
+    cache.set(_force_logout_key(user_id), int(time.time()), 7 * 24 * 3600)
+
+
+def is_force_logged_out(user_id: int, token_iat: int) -> bool:
+    """检查 Token 的签发时间是否早于该用户被强制下线的时间."""
+    force_at = cache.get(_force_logout_key(user_id))
+    if force_at is None:
+        return False
+    return token_iat < force_at
+
+
+def clear_force_logout(user_id: int) -> None:
+    cache.delete(_force_logout_key(user_id))

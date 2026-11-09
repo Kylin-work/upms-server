@@ -15,6 +15,7 @@ from apps.guard.services.jwt_utils import (
 from apps.identity.models import SysUser
 from apps.identity.services.auth_security import (
     clear_failures,
+    clear_force_logout,
     is_locked,
     record_failure,
 )
@@ -116,6 +117,7 @@ def login(request, payload: LoginIn):
         raise Unauthorized("USER_DISABLED")
 
     clear_failures(payload.username)
+    clear_force_logout(user.id)
 
     access_token = encode_access_token(user.id)
     refresh_token = encode_refresh_token(user.id)
