@@ -5,6 +5,7 @@ from apps.audit.models import (
     SysAuditLogin,
     SysAuditOperation,
 )
+from apps.identity.models import SysUser  # 新增导入
 
 
 def log_login(
@@ -33,7 +34,7 @@ def log_operation(
     *,
     trace_id: str,
     user_id: int | None,
-    username: str,
+    username: str | None = None,  # 改为可选，如果传了空则自动查库
     module: str,
     resource_code: str,
     http_method: str,
@@ -47,6 +48,16 @@ def log_operation(
     cost_ms: int | None = None,
     ip: str | None = None,
 ) -> None:
+    # 如果没有传 username 且有 user_id，则自动去查库获取
+    if not username and user_id:
+        u = SysUser.objects.filter(id=user_id).only("username").first()
+        if u:
+            username = u.username
+
+    # 如果查库也没有（如系统自动执行），则兜底
+    if not username:
+        username = "SYSTEM"
+
     SysAuditOperation.objects.create(
         trace_id=trace_id,
         user_id=user_id,
