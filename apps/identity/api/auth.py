@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.contrib.auth.hashers import check_password
+from django.contrib.auth.hashers import check_password, make_password
 from django.core.cache import caches
 from django.utils import timezone
 from ninja import Router, Schema
@@ -12,6 +12,17 @@ from apps.guard.services.jwt_utils import (
     encode_refresh_token,
 )
 from apps.identity.models import SysUser
+from apps.identity.services.auth_security import (
+    clear_failures,
+    is_locked,
+    record_failure,
+)
+from apps.identity.services.password_policy import (
+    PasswordPolicyError,
+    record_password_history,
+    validate_password_history,
+    validate_password_strength,
+)
 
 router = Router(tags=["auth"])
 
@@ -30,6 +41,9 @@ class LoginOut(Schema):
     expires_in: int = Field(..., description="Access Token 过期时间(秒)")
     user_id: int = Field(..., description="用户ID")
     real_name: str = Field(..., description="真实姓名")
+    need_change_password: bool = Field(
+        False, description="是否需要强制修改密码(首登或密码过期)"
+    )
 
 
 class RefreshIn(Schema):
@@ -46,19 +60,43 @@ class LogoutOut(Schema):
     success: bool = Field(True, description="是否成功登出")
 
 
+class ChangePasswordIn(Schema):
+    old_password: str = Field(..., description="旧密码")
+    new_password: str = Field(..., description="新密码")
+
+
+class ChangePasswordOut(Schema):
+    success: bool = Field(True, description="是否修改成功")
+
+
 @router.post("/auth/login", response=LoginOut, summary="用户登录")
 def login(request, payload: LoginIn):
     """校验账号密码，签发 Access Token 和 Refresh Token。"""
+    if is_locked(payload.username):
+        raise Unauthorized("ACCOUNT_LOCKED")
+
     user = SysUser.objects.filter(username=payload.username).first()
     if user is None or not check_password(payload.password, user.password_hash):
+        record_failure(payload.username)
         raise Unauthorized("BAD_CREDENTIAL")
+
     if user.status != 1:
         raise Unauthorized("USER_DISABLED")
+
+    clear_failures(payload.username)
 
     access_token = encode_access_token(user.id)
     refresh_token = encode_refresh_token(user.id)
     now = timezone.now()
     SysUser.objects.filter(id=user.id).update(last_login_at=now, updated_at=now)
+
+    need_change = False
+    if user.pwd_updated_at is None:
+        need_change = True
+    else:
+        days_since_update = (now - user.pwd_updated_at).days
+        if days_since_update >= settings.PASSWORD_EXPIRE_DAYS:
+            need_change = True
 
     return {
         "access_token": access_token,
@@ -66,18 +104,17 @@ def login(request, payload: LoginIn):
         "expires_in": settings.JWT_ACCESS_EXPIRE_SECONDS,
         "user_id": user.id,
         "real_name": user.real_name,
+        "need_change_password": need_change,
     }
 
 
 @router.post("/auth/refresh", response=RefreshOut, summary="刷新Token")
 def refresh(request, payload: RefreshIn):
     """使用 Refresh Token 换取新的 Access Token。"""
-    # 解析并校验类型，必须是 refresh
     data = decode_token(payload.refresh_token, expected_type="refresh")
     if data is None:
         raise Unauthorized("TOKEN_INVALID")
 
-    # 检查该 refresh token 是否已被登出（列入黑名单）
     jti = data.get("jti")
     if jti and SESSION_BLACKLIST.get(f"session:blacklist:{jti}"):
         raise Unauthorized("SESSION_REVOKED")
@@ -87,7 +124,6 @@ def refresh(request, payload: RefreshIn):
     if user is None or user.status != 1:
         raise Unauthorized("USER_DISABLED")
 
-    # 签发新的 Access Token
     access_token = encode_access_token(user.id)
     return {
         "access_token": access_token,
@@ -109,6 +145,50 @@ def logout(request):
     if jti and exp:
         ttl = max(int(exp - timezone.now().timestamp()), 1)
         SESSION_BLACKLIST.set(f"session:blacklist:{jti}", 1, ttl)
+    return {"success": True}
+
+
+@router.post(
+    "/auth/change-password", response=ChangePasswordOut, auth=None, summary="修改密码"
+)
+def change_password(request, payload: ChangePasswordIn):
+    """
+    修改当前用户密码。
+
+    必须登录，且校验旧密码。修改成功后 pwd_updated_at 会更新。
+    """
+    token = _extract_bearer(request)
+    if not token:
+        raise Unauthorized("NO_TOKEN")
+    data = decode_token(token, expected_type="access")
+    if data is None:
+        raise Unauthorized("TOKEN_INVALID")
+
+    user = SysUser.objects.filter(id=int(data["sub"])).first()
+    if user is None or user.status != 1:
+        raise Unauthorized("USER_DISABLED")
+
+    if not check_password(payload.old_password, user.password_hash):
+        raise Unauthorized("BAD_CREDENTIAL")
+
+    try:
+        # 1. 校验强度
+        validate_password_strength(payload.new_password)
+        # 2. 校验历史重复
+        validate_password_history(user.id, payload.new_password, limit=3)
+    except PasswordPolicyError as exc:
+        from ninja.errors import HttpError
+
+        raise HttpError(400, exc.code) from exc
+
+    # 3. 记录旧密码到历史
+    record_password_history(user.id, user.password_hash)
+
+    # 4. 更新密码
+    user.password_hash = make_password(payload.new_password)
+    user.pwd_updated_at = timezone.now()
+    user.save(update_fields=["password_hash", "pwd_updated_at"])
+
     return {"success": True}
 
 
