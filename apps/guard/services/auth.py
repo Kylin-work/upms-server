@@ -33,6 +33,8 @@ def authenticate(request) -> SysUser:
         raise Unauthorized("USER_DISABLED")
 
     request.user = user
+    request.authenticated_user_id = user.id  # 供中间件日志读取
+
     return user
 
 

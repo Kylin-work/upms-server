@@ -7,7 +7,7 @@ from apps.authz.api.permission_sets import router as sets_router
 from apps.authz.api.resources import router as resources_router
 from apps.authz.api.roles import router as roles_router
 from apps.guard.api.me import router as me_router
-from apps.guard.services.exceptions import GuardError
+from apps.guard.api.response import error_handler
 from apps.identity.api.auth import router as auth_router
 from apps.identity.api.sessions import router as sessions_router
 from apps.identity.api.users import router as users_router
@@ -17,6 +17,7 @@ from apps.orgs.api.tree import router as tree_router
 from apps.support.api.jobs import router as jobs_router
 
 api = NinjaAPI(title="UPMS", version="1.0")
+
 api.add_router("", me_router)
 api.add_router("", auth_router)
 api.add_router("", stores_router)
@@ -33,17 +34,13 @@ api.add_router("", tree_router)
 api.add_router("", orgs_router)
 
 
-@api.exception_handler(GuardError)
-def guard_error_handler(request, exc: GuardError):
-    return api.create_response(
-        request,
-        {"code": exc.code, "detail": exc.detail},
-        status=exc.status_code,
-    )
+# 用装饰器注册全局异常拦截
+@api.exception_handler(Exception)
+def global_exception_handler(request, exc):
+    return error_handler(request, exc)
 
 
 # 在路由挂载完成后，自动触发一次资源同步
-# 为了避免服务启动时的循环导入报错，把 import 放在函数内部
 def _auto_sync_resources():
     import sys
 
