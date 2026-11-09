@@ -5,6 +5,7 @@ from django.utils import timezone
 from ninja import Router, Schema
 from pydantic import Field
 
+from apps.audit.services import log_login
 from apps.guard.services.exceptions import Unauthorized
 from apps.guard.services.jwt_utils import (
     decode_token,
@@ -72,15 +73,46 @@ class ChangePasswordOut(Schema):
 @router.post("/auth/login", response=LoginOut, summary="用户登录")
 def login(request, payload: LoginIn):
     """校验账号密码，签发 Access Token 和 Refresh Token。"""
+    # 获取客户端信息
+    ip = _client_ip(request)
+    user_agent = request.META.get("HTTP_USER_AGENT", "")[:255]
+
     if is_locked(payload.username):
+        log_login(
+            user_id=None,
+            username=payload.username,
+            login_type="PASSWORD",
+            login_result="FAIL",
+            fail_reason="LOCKED",
+            ip=ip,
+            user_agent=user_agent,
+        )
         raise Unauthorized("ACCOUNT_LOCKED")
 
     user = SysUser.objects.filter(username=payload.username).first()
     if user is None or not check_password(payload.password, user.password_hash):
         record_failure(payload.username)
+        log_login(
+            user_id=user.id if user else None,
+            username=payload.username,
+            login_type="PASSWORD",
+            login_result="FAIL",
+            fail_reason="BAD_CREDENTIAL",
+            ip=ip,
+            user_agent=user_agent,
+        )
         raise Unauthorized("BAD_CREDENTIAL")
 
     if user.status != 1:
+        log_login(
+            user_id=user.id,
+            username=payload.username,
+            login_type="PASSWORD",
+            login_result="FAIL",
+            fail_reason="DISABLED",
+            ip=ip,
+            user_agent=user_agent,
+        )
         raise Unauthorized("USER_DISABLED")
 
     clear_failures(payload.username)
@@ -97,6 +129,16 @@ def login(request, payload: LoginIn):
         days_since_update = (now - user.pwd_updated_at).days
         if days_since_update >= settings.PASSWORD_EXPIRE_DAYS:
             need_change = True
+
+    log_login(
+        user_id=user.id,
+        username=payload.username,
+        login_type="PASSWORD",
+        login_result="SUCCESS",
+        fail_reason=None,
+        ip=ip,
+        user_agent=user_agent,
+    )
 
     return {
         "access_token": access_token,
@@ -154,7 +196,6 @@ def logout(request):
 def change_password(request, payload: ChangePasswordIn):
     """
     修改当前用户密码。
-
     必须登录，且校验旧密码。修改成功后 pwd_updated_at 会更新。
     """
     token = _extract_bearer(request)
@@ -172,19 +213,15 @@ def change_password(request, payload: ChangePasswordIn):
         raise Unauthorized("BAD_CREDENTIAL")
 
     try:
-        # 1. 校验强度
         validate_password_strength(payload.new_password)
-        # 2. 校验历史重复
         validate_password_history(user.id, payload.new_password, limit=3)
     except PasswordPolicyError as exc:
         from ninja.errors import HttpError
 
         raise HttpError(400, exc.code) from exc
 
-    # 3. 记录旧密码到历史
     record_password_history(user.id, user.password_hash)
 
-    # 4. 更新密码
     user.password_hash = make_password(payload.new_password)
     user.pwd_updated_at = timezone.now()
     user.save(update_fields=["password_hash", "pwd_updated_at"])
@@ -197,3 +234,10 @@ def _extract_bearer(request) -> str | None:
     if not auth.startswith("Bearer "):
         return None
     return auth[len("Bearer ") :].strip() or None
+
+
+def _client_ip(request) -> str | None:
+    forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR")
