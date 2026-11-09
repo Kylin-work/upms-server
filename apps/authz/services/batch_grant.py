@@ -52,15 +52,13 @@ def resolve_targets(
         if org is None:
             raise BatchGrantError("ORG_NOT_FOUND")
         users = SysUser.objects.filter(
-            org__path__startswith=org.path,
-            status=1,
+            org__path__startswith=org.path, status=1,
         )
     elif mode == "position":
         if not position_code:
             raise BatchGrantError("POSITION_CODE_REQUIRED")
         users = SysUser.objects.filter(
-            position__position_code=position_code,
-            status=1,
+            position__position_code=position_code, status=1,
         )
     elif mode == "usernames":
         if not usernames:
@@ -120,29 +118,54 @@ def execute(
     skipped_count = 0
     rejected_count = 0
 
+    # 收集要插入的记录和要失效的用户
+    to_insert = []
+    affected_user_ids = []
+    detail_summary = []
+
     for user in target_users:
-        status, _reasons = _classify_user(user, roles, operator)
+        status, reasons = _classify_user(user, roles, operator)
         if status == "skipped":
             skipped_count += 1
+            detail_summary.append(f"user:{user.id}=SKIP")
             continue
         if status == "rejected":
             rejected_count += 1
+            detail_summary.append(f"user:{user.id}=REJECT({','.join(reasons)})")
             continue
-        for role in roles:
-            SysUserRole.objects.get_or_create(
-                user=user,
-                role=role,
-                defaults={
-                    "granted_by": operator.id,
-                    "granted_at": now,
-                    "source": "BATCH",
-                    "batch_id": batch_id,
-                },
-            )
-        _bump_version(f"USER:{user.id}", now)
-        affected_count += 1
 
+        for role in roles:
+            to_insert.append(
+                SysUserRole(
+                    user=user,
+                    role=role,
+                    granted_by=operator.id,
+                    granted_at=now,
+                    source="BATCH",
+                    batch_id=batch_id,
+                )
+            )
+        affected_user_ids.append(user.id)
+        affected_count += 1
+        detail_summary.append(f"user:{user.id}=AFFECTED")
+
+    # 分页批量插入（每批 500 条）
+    BATCH_SIZE = 500
+    for i in range(0, len(to_insert), BATCH_SIZE):
+        chunk = to_insert[i:i + BATCH_SIZE]
+        SysUserRole.objects.bulk_create(chunk, ignore_conflicts=True)
+
+    # 递增受影响用户的版本号
+    for uid in affected_user_ids:
+        _bump_version(f"USER:{uid}", now)
     _bump_version("GLOBAL", now)
+
+    # 写入聚合审计，并附带限制长度的逐用户明细摘要
+    # 考虑到 sys_audit_grant_change.diff_summary 只有 512 字节，超出部分截断
+    summary = f"affected={affected_count},skipped={skipped_count},rejected={rejected_count} | " + ";".join(detail_summary)
+    if len(summary) > 512:
+        summary = summary[:509] + "..."
+
     log_grant_change(
         trace_id=uuid.uuid4().hex,
         operator_id=operator.id,
@@ -150,9 +173,7 @@ def execute(
         target_type="USER",
         target_id=0,
         reason=reason,
-        diff_summary=(
-            f"affected={affected_count},skipped={skipped_count},rejected={rejected_count}"
-        ),
+        diff_summary=summary,
         batch_id=batch_id,
     )
 
@@ -173,9 +194,7 @@ def _check_realm_grantable(operator, role: SysRole) -> None:
         raise BatchGrantError("REALM_VIOLATION")
 
 
-def _classify_user(
-    user: SysUser, roles: list[SysRole], operator
-) -> tuple[str, list[str]]:
+def _classify_user(user: SysUser, roles: list[SysRole], operator) -> tuple[str, list[str]]:
     """单用户分类:affected / skipped / rejected,附原因列表."""
     rejected: list[str] = []
     for role in roles:
@@ -189,9 +208,8 @@ def _classify_user(
         return "rejected", rejected
 
     existing = set(
-        SysUserRole.objects.filter(user=user, role__in=roles).values_list(
-            "role_id", flat=True
-        )
+        SysUserRole.objects.filter(user=user, role__in=roles)
+        .values_list("role_id", flat=True)
     )
     if len(existing) == len(roles):
         return "skipped", ["ALREADY_GRANTED"]
@@ -205,6 +223,5 @@ def _bump_version(scope_key: str, now) -> None:
     )
     if not created:
         SysPermVersion.objects.filter(scope_key=scope_key).update(
-            version=F("version") + 1,
-            updated_at=now,
+            version=F("version") + 1, updated_at=now,
         )
