@@ -17,6 +17,12 @@ from apps.identity.services.auth_security import (
     is_locked,
     record_failure,
 )
+from apps.identity.services.password_policy import (
+    PasswordPolicyError,
+    record_password_history,
+    validate_password_history,
+    validate_password_strength,
+)
 
 router = Router(tags=["auth"])
 
@@ -151,7 +157,6 @@ def change_password(request, payload: ChangePasswordIn):
 
     必须登录，且校验旧密码。修改成功后 pwd_updated_at 会更新。
     """
-    # 这里不能用 perm()，因为处于“强制改密”状态的用户可能没有业务权限，只要 token 有效即可
     token = _extract_bearer(request)
     if not token:
         raise Unauthorized("NO_TOKEN")
@@ -166,8 +171,20 @@ def change_password(request, payload: ChangePasswordIn):
     if not check_password(payload.old_password, user.password_hash):
         raise Unauthorized("BAD_CREDENTIAL")
 
-    # TODO: 此处可加入密码强度校验（长度、复杂度等）
+    try:
+        # 1. 校验强度
+        validate_password_strength(payload.new_password)
+        # 2. 校验历史重复
+        validate_password_history(user.id, payload.new_password, limit=3)
+    except PasswordPolicyError as exc:
+        from ninja.errors import HttpError
 
+        raise HttpError(400, exc.code) from exc
+
+    # 3. 记录旧密码到历史
+    record_password_history(user.id, user.password_hash)
+
+    # 4. 更新密码
     user.password_hash = make_password(payload.new_password)
     user.pwd_updated_at = timezone.now()
     user.save(update_fields=["password_hash", "pwd_updated_at"])
