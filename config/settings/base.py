@@ -48,6 +48,7 @@ INSTALLED_APPS = [
 # 中间件
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "apps.guard.middleware_log.TraceIDMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -137,3 +138,28 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # 默认主键类型
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        "upms.request": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
