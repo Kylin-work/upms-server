@@ -8,49 +8,63 @@ router = Router(tags=["me"])
 
 
 class UserBrief(Schema):
-    id: int
-    name: str
-    realm: str | None
-    org_id: int | None
+    id: int = Field(..., description="用户ID")
+    name: str = Field(..., description="真实姓名")
+    realm: str | None = Field(
+        None, description="所属域(HQ/DIRECT/FRANCHISE),超管为NULL"
+    )
+    org_id: int | None = Field(None, description="所属组织ID,超管为NULL")
 
 
 class MenuNode(Schema):
-    code: str
-    name: str
-    icon: str | None = None
-    path: str | None = None
-    children: list["MenuNode"] = Field(default_factory=list)
+    code: str = Field(..., description="菜单资源码")
+    name: str = Field(..., description="菜单名称")
+    icon: str | None = Field(None, description="图标标识")
+    path: str | None = Field(None, description="前端路由路径")
+    children: list["MenuNode"] = Field(default_factory=list, description="子菜单列表")
 
 
 class PermissionsResponse(Schema):
-    perm_version: int
-    user: UserBrief
-    menus: list[MenuNode] = Field(default_factory=list)
-    buttons: list[str] = Field(default_factory=list)
-    apis: list[str] = Field(default_factory=list)
-    data_scopes: dict
-    column_masks: dict
-    etag: str
+    perm_version: int = Field(..., description="权限版本号")
+    user: UserBrief = Field(..., description="当前用户摘要信息")
+    menus: list[MenuNode] = Field(default_factory=list, description="已裁剪的菜单树")
+    buttons: list[str] = Field(
+        default_factory=list, description="当前用户可见的按钮编码列表"
+    )
+    apis: list[str] = Field(
+        default_factory=list, description="当前用户可调用的API资源码列表"
+    )
+    data_scopes: dict = Field(..., description="数据范围配置,键为资源码或通配符*")
+    column_masks: dict = Field(..., description="列级掩码配置,键为字段名")
+    etag: str = Field(..., description="响应校验标识,用于条件请求")
 
 
 class MenusResponse(Schema):
-    perm_version: int
-    menus: list[MenuNode] = Field(default_factory=list)
-    etag: str
+    perm_version: int = Field(..., description="权限版本号")
+    menus: list[MenuNode] = Field(default_factory=list, description="已裁剪的菜单树")
+    etag: str = Field(..., description="响应校验标识,用于条件请求")
 
 
 class ButtonsResponse(Schema):
-    perm_version: int
-    buttons: list[str] = Field(default_factory=list)
-    etag: str
+    perm_version: int = Field(..., description="权限版本号")
+    buttons: list[str] = Field(
+        default_factory=list, description="当前用户可见的按钮编码列表"
+    )
+    etag: str = Field(..., description="响应校验标识,用于条件请求")
 
 
 @router.get(
     "/me/permissions",
     response=PermissionsResponse,
     auth=perm("me.perm.view"),
+    summary="获取当前用户权限",
 )
 def get_my_permissions(request):
+    """
+    返回完整的权限快照。
+
+    包含当前用户的菜单树、按钮编码、接口资源码以及数据范围。
+    """
     user = request.user
     snapshot = load_permission_snapshot(user)
     return {
@@ -74,8 +88,12 @@ def get_my_permissions(request):
     "/me/menus",
     response=MenusResponse,
     auth=perm("me.perm.view"),
+    summary="获取当前用户菜单",
 )
 def get_my_menus(request):
+    """
+    返回当前用户可见的菜单树。
+    """
     user = request.user
     snapshot = load_permission_snapshot(user)
     return {
@@ -89,8 +107,12 @@ def get_my_menus(request):
     "/me/buttons",
     response=ButtonsResponse,
     auth=perm("me.perm.view"),
+    summary="获取当前用户按钮",
 )
 def get_my_buttons(request):
+    """
+    返回当前用户可见的按钮编码扁平列表。
+    """
     user = request.user
     snapshot = load_permission_snapshot(user)
     return {
