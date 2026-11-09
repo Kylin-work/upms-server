@@ -40,3 +40,23 @@ def guard_error_handler(request, exc: GuardError):
         {"code": exc.code, "detail": exc.detail},
         status=exc.status_code,
     )
+
+
+# 在路由挂载完成后，自动触发一次资源同步
+# 为了避免服务启动时的循环导入报错，把 import 放在函数内部
+def _auto_sync_resources():
+    import sys
+
+    if "runserver" in sys.argv or "gunicorn" in sys.argv or "uvicorn" in sys.argv:
+        try:
+            from apps.support.management.commands.sync_resources import auto_sync
+
+            auto_sync()
+        except Exception:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.exception("API 资源自动同步失败")
+
+
+_auto_sync_resources()
