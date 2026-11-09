@@ -20,7 +20,8 @@ JWT_SECRET = os.environ.get("JWT_SECRET", SECRET_KEY)
 JWT_ALGORITHM = "HS256"
 JWT_ACCESS_EXPIRE_SECONDS = 2 * 60 * 60  # 2 小时
 JWT_REFRESH_EXPIRE_SECONDS = 7 * 24 * 60 * 60  # 7 天
-
+# 密码策略
+PASSWORD_EXPIRE_DAYS = 90
 # 调试开关,生产环境由 config.settings.production 覆盖
 DEBUG = True
 

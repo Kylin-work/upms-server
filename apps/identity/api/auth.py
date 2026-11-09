@@ -12,6 +12,11 @@ from apps.guard.services.jwt_utils import (
     encode_refresh_token,
 )
 from apps.identity.models import SysUser
+from apps.identity.services.auth_security import (
+    clear_failures,
+    is_locked,
+    record_failure,
+)
 
 router = Router(tags=["auth"])
 
@@ -30,6 +35,9 @@ class LoginOut(Schema):
     expires_in: int = Field(..., description="Access Token 过期时间(秒)")
     user_id: int = Field(..., description="用户ID")
     real_name: str = Field(..., description="真实姓名")
+    need_change_password: bool = Field(
+        False, description="是否需要强制修改密码(首登或密码过期)"
+    )
 
 
 class RefreshIn(Schema):
@@ -49,16 +57,35 @@ class LogoutOut(Schema):
 @router.post("/auth/login", response=LoginOut, summary="用户登录")
 def login(request, payload: LoginIn):
     """校验账号密码，签发 Access Token 和 Refresh Token。"""
+    # 1. 检查是否已被锁定
+    if is_locked(payload.username):
+        raise Unauthorized("ACCOUNT_LOCKED")
+
     user = SysUser.objects.filter(username=payload.username).first()
     if user is None or not check_password(payload.password, user.password_hash):
+        # 2. 密码错误,记录失败次数
+        record_failure(payload.username)
         raise Unauthorized("BAD_CREDENTIAL")
+
     if user.status != 1:
         raise Unauthorized("USER_DISABLED")
+
+    # 3. 登录成功,清空失败计数
+    clear_failures(payload.username)
 
     access_token = encode_access_token(user.id)
     refresh_token = encode_refresh_token(user.id)
     now = timezone.now()
     SysUser.objects.filter(id=user.id).update(last_login_at=now, updated_at=now)
+
+    # 4. 判断是否需要强制改密:从未改过密码,或密码已过期(90天)
+    need_change = False
+    if user.pwd_updated_at is None:
+        need_change = True
+    else:
+        days_since_update = (now - user.pwd_updated_at).days
+        if days_since_update >= settings.PASSWORD_EXPIRE_DAYS:
+            need_change = True
 
     return {
         "access_token": access_token,
@@ -66,18 +93,17 @@ def login(request, payload: LoginIn):
         "expires_in": settings.JWT_ACCESS_EXPIRE_SECONDS,
         "user_id": user.id,
         "real_name": user.real_name,
+        "need_change_password": need_change,
     }
 
 
 @router.post("/auth/refresh", response=RefreshOut, summary="刷新Token")
 def refresh(request, payload: RefreshIn):
     """使用 Refresh Token 换取新的 Access Token。"""
-    # 解析并校验类型，必须是 refresh
     data = decode_token(payload.refresh_token, expected_type="refresh")
     if data is None:
         raise Unauthorized("TOKEN_INVALID")
 
-    # 检查该 refresh token 是否已被登出（列入黑名单）
     jti = data.get("jti")
     if jti and SESSION_BLACKLIST.get(f"session:blacklist:{jti}"):
         raise Unauthorized("SESSION_REVOKED")
@@ -87,7 +113,6 @@ def refresh(request, payload: RefreshIn):
     if user is None or user.status != 1:
         raise Unauthorized("USER_DISABLED")
 
-    # 签发新的 Access Token
     access_token = encode_access_token(user.id)
     return {
         "access_token": access_token,
