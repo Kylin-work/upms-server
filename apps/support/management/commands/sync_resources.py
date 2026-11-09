@@ -17,52 +17,60 @@ def _extract_resource_code(auth_callbacks) -> str | None:
     return None
 
 
+def auto_sync() -> tuple[int, int]:
+    """核心扫描逻辑，返回 (新建数量, 更新数量)."""
+    from config.api import api
+
+    created_count = 0
+    updated_count = 0
+
+    for prefix, router in api._routers:
+        for path, path_ops in router.path_operations.items():
+            for op in path_ops.operations:
+                resource_code = _extract_resource_code(op.auth_callbacks)
+                if not resource_code:
+                    continue
+
+                method = op.methods[0].upper() if op.methods else "GET"
+                path_str = f"/api/v1{prefix}{path}"
+
+                resource = SysResource.objects.filter(
+                    resource_code=resource_code
+                ).first()
+                if not resource:
+                    doc = (op.view_func.__doc__ or "").strip()
+                    resource_name = doc.split("\n")[0] if doc else resource_code
+                    SysResource.objects.create(
+                        resource_code=resource_code,
+                        resource_name=resource_name,
+                        res_type="API",
+                        op_type="QUERY" if method == "GET" else "WRITE",
+                        realm_scope="ALL",
+                        http_method=method,
+                        api_pattern=path_str,
+                        is_public=False,
+                        status=1,
+                    )
+                    created_count += 1
+                else:
+                    resource.api_pattern = path_str
+                    resource.http_method = method
+                    resource.save(update_fields=["api_pattern", "http_method"])
+                    updated_count += 1
+
+    if created_count > 0 or updated_count > 0:
+        invalidate_registry()
+
+    return created_count, updated_count
+
+
 class Command(BaseCommand):
     help = "从路由对象自动同步 API 资源到数据库"
 
     def handle(self, *args, **options):
-        from config.api import api
-
-        created_count = 0
-        updated_count = 0
-
-        for prefix, router in api._routers:
-            for path, path_ops in router.path_operations.items():
-                for op in path_ops.operations:
-                    resource_code = _extract_resource_code(op.auth_callbacks)
-                    if not resource_code:
-                        continue
-
-                    method = op.methods[0].upper() if op.methods else "GET"
-                    path_str = f"/api/v1{prefix}{path}"
-
-                    resource = SysResource.objects.filter(
-                        resource_code=resource_code
-                    ).first()
-                    if not resource:
-                        doc = (op.view_func.__doc__ or "").strip()
-                        resource_name = doc.split("\n")[0] if doc else resource_code
-                        SysResource.objects.create(
-                            resource_code=resource_code,
-                            resource_name=resource_name,
-                            res_type="API",
-                            op_type="QUERY" if method == "GET" else "WRITE",
-                            realm_scope="ALL",
-                            http_method=method,
-                            api_pattern=path_str,
-                            is_public=False,
-                            status=1,
-                        )
-                        created_count += 1
-                    else:
-                        resource.api_pattern = path_str
-                        resource.http_method = method
-                        resource.save(update_fields=["api_pattern", "http_method"])
-                        updated_count += 1
-
+        created_count, updated_count = auto_sync()
         self.stdout.write(
             self.style.SUCCESS(
                 f"同步完成: 新建 {created_count} 个资源, 更新 {updated_count} 个资源"
             )
         )
-        invalidate_registry()

@@ -4,14 +4,12 @@ from ninja import File, Router, Schema
 from ninja.errors import HttpError
 from ninja.files import UploadedFile
 
-from apps.guard.selectors.filters import apply_data_scope
 from apps.guard.services.perm import perm
-from apps.orgs.models import SysOrg
+from apps.orgs.selectors.store import get_store, list_stores
 from apps.orgs.services.store import (
-    StoreCreateError,
+    StoreServiceError,
     create_store,
     disable_store,
-    get_store,
     update_store,
 )
 from apps.orgs.services.store_batch import (
@@ -53,18 +51,10 @@ class BatchOut(Schema):
 
 
 @router.get("/orgs/stores", response=list[StoreOut], auth=perm("org.store.list"))
-def list_stores(request):
+def list_stores_api(request):
     # 只返回启用门店,再按数据范围过滤
-    qs = SysOrg.objects.filter(
-        org_type__in=["STORE_DIRECT", "STORE_FRANCHISE"], status=1
-    )
-    scope = request.ctx_data_scope
-    qs = apply_data_scope(qs, scope, org_field="path")
-    return list(
-        qs.order_by("id").values(
-            "id", "org_code", "org_name", "org_type", "status", "path"
-        )
-    )
+    qs = list_stores(request.ctx_data_scope)
+    return list(qs.values("id", "org_code", "org_name", "org_type", "status", "path"))
 
 
 @router.post("/orgs/stores", response=StoreOut, auth=perm("org.store.create"))
@@ -81,7 +71,7 @@ def create_store_api(request, payload: StoreCreateIn):
             request_path=request.path,
             ip=_client_ip(request),
         )
-    except StoreCreateError as exc:
+    except StoreServiceError as exc:
         raise HttpError(400, exc.code) from exc
     return {
         "id": store.id,
@@ -119,7 +109,7 @@ def get_store_api(request, store_id: int):
     # 详情:套数据范围过滤,不在范围内的门店返回 404
     try:
         store = get_store(store_id, request.ctx_data_scope)
-    except StoreCreateError as exc:
+    except StoreServiceError as exc:
         raise HttpError(404, exc.code) from exc
     return {
         "id": store.id,
@@ -143,7 +133,7 @@ def update_store_api(request, store_id: int, payload: StoreUpdateIn):
             request_path=request.path,
             ip=_client_ip(request),
         )
-    except StoreCreateError as exc:
+    except StoreServiceError as exc:
         raise HttpError(400, exc.code) from exc
     return {
         "id": store.id,
@@ -166,7 +156,7 @@ def disable_store_api(request, store_id: int):
             request_path=request.path,
             ip=_client_ip(request),
         )
-    except StoreCreateError as exc:
+    except StoreServiceError as exc:
         raise HttpError(400, exc.code) from exc
     return {"success": True}
 

@@ -6,7 +6,7 @@ import uuid
 from django.db import transaction
 from django.utils import timezone
 
-from apps.orgs.services.store import StoreCreateError, create_store
+from apps.orgs.services.store import StoreServiceError, create_store
 from apps.support.models import SysBatchJob, SysBatchJobItem
 
 
@@ -79,7 +79,7 @@ def run_job(*, job: SysBatchJob, rows: list[dict], operator_id: int) -> SysBatch
                 result_ref={"store_code": biz_key},
             )
             success += 1
-        except StoreCreateError as exc:
+        except StoreServiceError as exc:
             SysBatchJobItem.objects.create(
                 job=job,
                 row_no=idx,
@@ -124,5 +124,5 @@ def _create_one(row: dict, *, operator_id: int):
 def _map_store_type(value: str) -> str:
     mapping = {"DIRECT": "STORE_DIRECT", "FRANCHISE": "STORE_FRANCHISE"}
     if value not in mapping:
-        raise StoreCreateError("INVALID_STORE_TYPE")
+        raise StoreServiceError("INVALID_STORE_TYPE")
     return mapping[value]
