@@ -393,6 +393,18 @@ RESOURCES = [
         False,
         None,
     ),
+    (
+        "org.move",
+        "移动组织节点",
+        "API",
+        "WRITE",
+        "ALL",
+        "PUT",
+        "/api/v1/orgs/{org_id}/move",
+        None,
+        False,
+        None,
+    ),
 ]
 
 PERMISSION_SETS = [
@@ -433,6 +445,7 @@ SET_ITEMS = {
         "audit.grant.query",
         "platform.job.view",
         "org.tree.view",
+        "org.move",
     ],
     "ps_hq_store_report_view": [
         "menu.store",
