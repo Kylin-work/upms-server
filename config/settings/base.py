@@ -29,6 +29,7 @@ ALLOWED_HOSTS = []
 
 # 应用注册
 INSTALLED_APPS = [
+    "corsheaders",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -47,6 +48,7 @@ INSTALLED_APPS = [
 
 # 中间件
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "apps.guard.middleware_log.TraceIDMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -163,3 +165,20 @@ LOGGING = {
         },
     },
 }
+
+
+# 跨域配置
+CORS_ALLOW_ALL_ORIGINS = True  # 开发环境允许所有，生产环境要改成 False 并配置白名单
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+    "x-request-id",
+]
