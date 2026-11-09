@@ -34,6 +34,9 @@ def move_org(*, org_id: int, new_parent_id: int) -> SysOrg:
 
     # 校验层级合法性
     _validate_org_type(org, new_parent)
+    # 如果父节点没变，直接返回，避免无意义的路径重写和版本递增
+    if org.parent_id == new_parent.id:
+        return org
 
     old_path = org.path
     new_path = f"{new_parent.path}{org.id}/"
