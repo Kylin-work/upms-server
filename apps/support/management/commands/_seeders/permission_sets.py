@@ -106,6 +106,54 @@ RESOURCES = [
         None,
     ),
     (
+        "identity.user.create",
+        "创建用户接口",
+        "API",
+        "WRITE",
+        "ALL",
+        "POST",
+        "/api/v1/users",
+        None,
+        False,
+        None,
+    ),
+    (
+        "identity.user.view",
+        "用户详情接口",
+        "API",
+        "QUERY",
+        "ALL",
+        "GET",
+        "/api/v1/users/{user_id}",
+        None,
+        False,
+        None,
+    ),
+    (
+        "identity.user.update",
+        "更新用户接口",
+        "API",
+        "WRITE",
+        "ALL",
+        "PUT",
+        "/api/v1/users/{user_id}",
+        None,
+        False,
+        None,
+    ),
+    (
+        "identity.user.disable",
+        "停用用户接口",
+        "API",
+        "WRITE",
+        "ALL",
+        "DELETE",
+        "/api/v1/users/{user_id}",
+        None,
+        False,
+        None,
+    ),
+    (
         "audit.operation.query",
         "操作日志查询接口",
         "API",
@@ -196,6 +244,10 @@ SET_ITEMS = {
         "org.store.list",
         "authz.role.grant",
         "identity.user.batch_create",
+        "identity.user.create",
+        "identity.user.view",
+        "identity.user.update",
+        "identity.user.disable",
         "audit.operation.query",
         "audit.grant.query",
         "platform.job.view",
@@ -345,11 +397,9 @@ def _assert():
 def _bump_global_version():
     now = timezone.now()
     _, created = SysPermVersion.objects.get_or_create(
-        scope_key="GLOBAL",
-        defaults={"version": 1, "updated_at": now},
+        scope_key="GLOBAL", defaults={"version": 1, "updated_at": now}
     )
     if not created:
         SysPermVersion.objects.filter(scope_key="GLOBAL").update(
-            version=F("version") + 1,
-            updated_at=now,
+            version=F("version") + 1, updated_at=now
         )
