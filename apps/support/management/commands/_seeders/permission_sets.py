@@ -130,6 +130,18 @@ RESOURCES = [
         None,
     ),
     (
+        "platform.job.view",
+        "批量作业查询接口",
+        "API",
+        "QUERY",
+        "ALL",
+        "GET",
+        "/api/v1/jobs/{job_no}",
+        None,
+        False,
+        None,
+    ),
+    (
         "store.create",
         "新建门店按钮",
         "BUTTON",
@@ -186,6 +198,7 @@ SET_ITEMS = {
         "identity.user.batch_create",
         "audit.operation.query",
         "audit.grant.query",
+        "platform.job.view",
     ],
     "ps_hq_store_report_view": [
         "menu.store",

@@ -8,6 +8,7 @@ from apps.guard.services.exceptions import GuardError
 from apps.identity.api.auth import router as auth_router
 from apps.identity.api.users import router as users_router
 from apps.orgs.api.stores import router as stores_router
+from apps.support.api.jobs import router as jobs_router
 
 api = NinjaAPI(title="UPMS", version="1.0")
 api.add_router("", me_router)
@@ -17,6 +18,7 @@ api.add_router("", grants_router)
 api.add_router("", batch_grant_router)
 api.add_router("", users_router)
 api.add_router("", audit_router)
+api.add_router("", jobs_router)
 
 
 @api.exception_handler(GuardError)
