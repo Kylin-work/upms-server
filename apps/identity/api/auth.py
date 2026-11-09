@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.contrib.auth.hashers import check_password
+from django.contrib.auth.hashers import check_password, make_password
 from django.core.cache import caches
 from django.utils import timezone
 from ninja import Router, Schema
@@ -54,23 +54,29 @@ class LogoutOut(Schema):
     success: bool = Field(True, description="是否成功登出")
 
 
+class ChangePasswordIn(Schema):
+    old_password: str = Field(..., description="旧密码")
+    new_password: str = Field(..., description="新密码")
+
+
+class ChangePasswordOut(Schema):
+    success: bool = Field(True, description="是否修改成功")
+
+
 @router.post("/auth/login", response=LoginOut, summary="用户登录")
 def login(request, payload: LoginIn):
     """校验账号密码，签发 Access Token 和 Refresh Token。"""
-    # 1. 检查是否已被锁定
     if is_locked(payload.username):
         raise Unauthorized("ACCOUNT_LOCKED")
 
     user = SysUser.objects.filter(username=payload.username).first()
     if user is None or not check_password(payload.password, user.password_hash):
-        # 2. 密码错误,记录失败次数
         record_failure(payload.username)
         raise Unauthorized("BAD_CREDENTIAL")
 
     if user.status != 1:
         raise Unauthorized("USER_DISABLED")
 
-    # 3. 登录成功,清空失败计数
     clear_failures(payload.username)
 
     access_token = encode_access_token(user.id)
@@ -78,7 +84,6 @@ def login(request, payload: LoginIn):
     now = timezone.now()
     SysUser.objects.filter(id=user.id).update(last_login_at=now, updated_at=now)
 
-    # 4. 判断是否需要强制改密:从未改过密码,或密码已过期(90天)
     need_change = False
     if user.pwd_updated_at is None:
         need_change = True
@@ -134,6 +139,39 @@ def logout(request):
     if jti and exp:
         ttl = max(int(exp - timezone.now().timestamp()), 1)
         SESSION_BLACKLIST.set(f"session:blacklist:{jti}", 1, ttl)
+    return {"success": True}
+
+
+@router.post(
+    "/auth/change-password", response=ChangePasswordOut, auth=None, summary="修改密码"
+)
+def change_password(request, payload: ChangePasswordIn):
+    """
+    修改当前用户密码。
+
+    必须登录，且校验旧密码。修改成功后 pwd_updated_at 会更新。
+    """
+    # 这里不能用 perm()，因为处于“强制改密”状态的用户可能没有业务权限，只要 token 有效即可
+    token = _extract_bearer(request)
+    if not token:
+        raise Unauthorized("NO_TOKEN")
+    data = decode_token(token, expected_type="access")
+    if data is None:
+        raise Unauthorized("TOKEN_INVALID")
+
+    user = SysUser.objects.filter(id=int(data["sub"])).first()
+    if user is None or user.status != 1:
+        raise Unauthorized("USER_DISABLED")
+
+    if not check_password(payload.old_password, user.password_hash):
+        raise Unauthorized("BAD_CREDENTIAL")
+
+    # TODO: 此处可加入密码强度校验（长度、复杂度等）
+
+    user.password_hash = make_password(payload.new_password)
+    user.pwd_updated_at = timezone.now()
+    user.save(update_fields=["password_hash", "pwd_updated_at"])
+
     return {"success": True}
 
 
